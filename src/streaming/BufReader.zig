@@ -109,7 +109,7 @@ test "Test buffer size" {
         try std.testing.expect(len2 == 2);
         try std.testing.expectEqualStrings("bc", data[0..len2]);
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 
 test "Test buffered data" {
@@ -151,7 +151,7 @@ test "Test buffered data" {
         _ = try br.take(1);
         try std.testing.expectEqualStrings("ab", br.buffer[0..2]);
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 
 

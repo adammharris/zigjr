@@ -316,7 +316,7 @@ test "DelimiterStream.streamResponses on JSON responses, single param, id" {
         } {};
 
         var response_reader = std.Io.Reader.fixed(writer_buf.written());
-        try zigjr.stream.responsesByDelimiter(alloc, &response_reader,
+        try zigjr.stream.responsesByDelimiter(alloc, std.testing.io, &response_reader,
                                               zigjr.ResponseDispatcher.implBy(&my_response_dispatcher), .{});
         try testing.expect(my_response_dispatcher.called);
     }
@@ -380,7 +380,7 @@ test "responsesByLength on JSON responses, single param, id" {
         } {};
 
         var response_reader = std.Io.Reader.fixed(writer_buf.written());
-        try zigjr.stream.responsesByDelimiter(alloc, &response_reader,
+        try zigjr.stream.responsesByDelimiter(alloc, std.testing.io, &response_reader,
                                               zigjr.ResponseDispatcher.implBy(&my_response_dispatcher), .{});
         try testing.expect(my_response_dispatcher.called);
     }

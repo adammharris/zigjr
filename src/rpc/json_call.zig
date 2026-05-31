@@ -244,26 +244,12 @@ inline fn getHandlerInfo(context: anytype, comptime handler_fn: anytype) Handler
 /// Make a tuple type from the parameters of a function.
 /// Each parameter becomes a field of the tuple.
 inline fn ArgsTupleType(comptime params: []const Type.Fn.Param) type {
-    comptime var fields: [params.len]std.builtin.Type.StructField = undefined;
+    comptime var fields: [params.len]type = undefined;
     inline for (params, 0..)|param, i| {
-        fields[i] = .{
-            .name = std.fmt.comptimePrint("{d}", .{i}),
-            .type = param.type orelse null,
-            .is_comptime = false,   // make all the fields not comptime to allow mutable tuple.
-            .default_value_ptr = null,
-            .alignment = 0,
-        };
+        fields[i] = param.type orelse null;
     }
 
-    // Create the tuple type. A tuple is a struct with is_tuple set.
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = fields[0..],
-            .decls = &.{},
-            .is_tuple = true,
-        },
-    });
+    return @Tuple(fields[0..]);
 }
 
 inline fn getFnInfo(comptime handler_fn: anytype) Type.Fn {

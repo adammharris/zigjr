@@ -23,11 +23,11 @@ const zigjr = @import("zigjr");
 //  nc64 localhost 35354 < data\hello_name.json
 
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var args = try CmdArgs.init(alloc);
+    var args = try CmdArgs.init(alloc, init.minimal.args);
     defer args.deinit();
     args.parse() catch { usage(); return; };
 
@@ -48,6 +48,7 @@ pub fn main() !void {
         .listen_address = listen_address,
         .local_address = local_address,
         .end_server = std.atomic.Value(bool).init(false),
+        .io = init.io,
     };
 
     const rpc_dispatcher = try createDispatcher(alloc, &ctx);
@@ -64,6 +65,7 @@ const ServerCtx = struct {
     listen_address: []const u8,
     local_address: []const u8,
     end_server: std.atomic.Value(bool),
+    io: std.Io,
 };
 
 fn createDispatcher(alloc: Allocator, ctx: *ServerCtx) !*zigjr.RpcDispatcher {
@@ -83,62 +85,62 @@ fn createDispatcher(alloc: Allocator, ctx: *ServerCtx) !*zigjr.RpcDispatcher {
 }
 
 fn runServer(ctx: *ServerCtx, dispatcher: zigjr.RequestDispatcher) !void {
-    const net_addr  = try std.net.Address.parseIpAndPort(ctx.listen_address);
-    var server      = try net_addr.listen(.{ .reuse_address = true });
-    defer server.deinit();
+    const net_addr  = try std.Io.net.IpAddress.parseLiteral(ctx.listen_address);
+    var server      = try net_addr.listen(ctx.io, .{ .reuse_address = true });
+    defer server.deinit(ctx.io);
 
     while (true) {
         if (ctx.end_server.load(std.builtin.AtomicOrder.seq_cst))
             break;
-        const connection = try server.accept();
+        const connection = try server.accept(ctx.io);
         if (ctx.end_server.load(std.builtin.AtomicOrder.seq_cst))
             break;
 
         if (ctx.is_http) {
-            _ = try std.Thread.spawn(.{}, httpWorker, .{dispatcher, connection});
+            _ = try std.Thread.spawn(.{}, httpWorker, .{ctx.io, dispatcher, connection});
         } else {
-            _ = try std.Thread.spawn(.{}, netWorker, .{dispatcher, connection});
+            _ = try std.Thread.spawn(.{}, netWorker, .{ctx.io, dispatcher, connection});
         }
     }
 }
 
-fn httpWorker(dispatcher: zigjr.RequestDispatcher, connection: std.net.Server.Connection) void {
+fn httpWorker(io: std.Io, dispatcher: zigjr.RequestDispatcher, connection: std.Io.net.Stream) void {
     std.debug.print("Start HTTP session.\n", .{});
 
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    runHttpSession(alloc, dispatcher, connection) catch |e| {
+    runHttpSession(alloc, io, dispatcher, connection) catch |e| {
         std.debug.print("Error in HTTP session: {any}\n", .{e});
     };
 
-    connection.stream.close();
+    connection.close(io);
     std.debug.print("End HTTP session.\n", .{});
 }
 
-fn netWorker(dispatcher: zigjr.RequestDispatcher, connection: std.net.Server.Connection) void {
+fn netWorker(io: std.Io, dispatcher: zigjr.RequestDispatcher, connection: std.Io.net.Stream) void {
     std.debug.print("Start session (netWorker).\n", .{});
 
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    runNetSession(alloc, dispatcher, connection) catch |e| {
+    runNetSession(alloc, io, dispatcher, connection) catch |e| {
         std.debug.print("Error in runSession: {any}\n", .{e});
     };
 
-    connection.stream.close();
+    connection.close(io);
     std.debug.print("End session (netWorker).\n", .{});
 }
 
-fn runHttpSession(alloc: Allocator, dispatcher: zigjr.RequestDispatcher,
-                  connection: std.net.Server.Connection) !void {
+fn runHttpSession(alloc: Allocator, io: std.Io, dispatcher: zigjr.RequestDispatcher,
+                  connection: std.Io.net.Stream) !void {
     var rbuf: [1024]u8  = undefined;
     var wbuf: [1024]u8  = undefined;
-    var s_reader        = connection.stream.reader(&rbuf);
-    var s_writer        = connection.stream.writer(&wbuf);
-    const reader        = s_reader.interface();
+    var s_reader        = connection.reader(io, &rbuf);
+    var s_writer        = connection.writer(io, &wbuf);
+    const reader        = &s_reader.interface;
     const writer        = &s_writer.interface;
     var dbg_logger      = zigjr.DbgLogger{};
     var pipeline        = try zigjr.RequestPipeline.init(alloc, dispatcher, dbg_logger.asLogger());
@@ -166,13 +168,13 @@ fn runHttpSession(alloc: Allocator, dispatcher: zigjr.RequestDispatcher,
     }
 }
 
-fn runNetSession(alloc: Allocator, dispatcher: zigjr.RequestDispatcher,
-                 connection: std.net.Server.Connection) !void {
+fn runNetSession(alloc: Allocator, io: std.Io, dispatcher: zigjr.RequestDispatcher,
+                 connection: std.Io.net.Stream) !void {
     var rbuf: [1024]u8  = undefined;
     var wbuf: [1024]u8  = undefined;
-    var s_reader        = connection.stream.reader(&rbuf);
-    var s_writer        = connection.stream.writer(&wbuf);
-    const reader        = s_reader.interface();
+    var s_reader        = connection.reader(io, &rbuf);
+    var s_writer        = connection.writer(io, &wbuf);
+    const reader        = &s_reader.interface;
     const writer        = &s_writer.interface;
     var dbg_logger      = zigjr.DbgLogger{};
 
@@ -183,10 +185,10 @@ fn runNetSession(alloc: Allocator, dispatcher: zigjr.RequestDispatcher,
     };
 }
 
-fn touchServer(address: []const u8) !void {
-    const net_addr  = try std.net.Address.parseIpAndPort(address);
-    var stream      = try std.net.tcpConnectToAddress(net_addr);
-    defer stream.close();
+fn touchServer(io: std.Io, address: []const u8) !void {
+    const net_addr  = try std.Io.net.IpAddress.parseLiteral(address);
+    var stream      = try net_addr.connect(io, .{ .protocol = .tcp, .mode = .stream });
+    defer stream.close(io);
 }
 
 // A handler with no parameter and returns a string.
@@ -234,7 +236,7 @@ fn endServer(ctx: *ServerCtx) zigjr.DispatchResult {
     // Set server termination flag.
     ctx.end_server.store(true, std.builtin.AtomicOrder.seq_cst);
     // Need to wake up server blocking at the .accept() call.
-    touchServer(ctx.local_address) catch |e| {
+    touchServer(ctx.io, ctx.local_address) catch |e| {
         std.debug.print("Error in touching server at {s}. Error: {any}\n", .{ctx.local_address, e});
     };
     return zigjr.DispatchResult.asEndStream();
@@ -256,13 +258,13 @@ fn usage() void {
 const CmdArgs = struct {
     const Self = @This();
 
-    arg_itr:    std.process.ArgIterator,
+    arg_itr:    std.process.Args.Iterator,
     is_http:    bool = false,
     is_tcp:     bool = false,
     port:       []const u8 = "35354",
 
-    fn init(alloc: Allocator) !CmdArgs {
-        var args = CmdArgs { .arg_itr = try std.process.argsWithAllocator(alloc) };
+    fn init(alloc: Allocator, pargs: std.process.Args) !CmdArgs {
+        var args = CmdArgs { .arg_itr = try pargs.iterateAllocator(alloc) };
         _ = args.arg_itr.next();
         return args;
     }

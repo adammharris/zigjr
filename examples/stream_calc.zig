@@ -14,17 +14,17 @@ const StringHashMap = std.hash_map.StringHashMap;
 const zigjr = @import("zigjr");
 
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    var args = try CmdArgs.init(alloc);
+    var args = try CmdArgs.init(alloc, init.minimal.args);
     defer args.deinit();
     args.parse() catch { usage(); return; };
-    try runExample(alloc, args);
+    try runExample(alloc, init.io, args);
 }
 
-fn runExample(alloc: Allocator, args: CmdArgs) !void {
+fn runExample(alloc: Allocator, io: std.Io, args: CmdArgs) !void {
     var stash = Stash.init(alloc);
     defer stash.deinit();
 
@@ -49,11 +49,11 @@ fn runExample(alloc: Allocator, args: CmdArgs) !void {
     try rpc_dispatcher.add("add-weight", addWeight);
 
     var stdin_buffer: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     var my_logger = MyLogger{};
@@ -213,13 +213,13 @@ fn usage() void {
 const CmdArgs = struct {
     const Self = @This();
 
-    arg_itr:        std.process.ArgIterator,
+    arg_itr:        std.process.Args.Iterator,
     by_delimiter:   bool = false,
     by_length:      bool = false,
 
-    fn init(allocator: Allocator) !CmdArgs {
+    fn init(allocator: Allocator, pargs: std.process.Args) !CmdArgs {
         var args = CmdArgs {
-            .arg_itr = try std.process.argsWithAllocator(allocator),
+            .arg_itr = try pargs.iterateAllocator(allocator),
         };
         _ = args.arg_itr.next();
         return args;

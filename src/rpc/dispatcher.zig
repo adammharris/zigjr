@@ -186,16 +186,6 @@ pub const DispatchResult = union(enum) {
 
 };
 
-// Force a pointer type to a const pointer type.
-fn ptrToConstPtrType(comptime T: type) type {
-    var ptr = @typeInfo(T).pointer;
-    ptr.is_const = true;
-    return @Type(.{
-        .pointer = ptr,
-    });
-}
-
-
 pub const DispatchErrors = error {
     NoHandlerForArrayParam,
     NoHandlerForObjectParam,

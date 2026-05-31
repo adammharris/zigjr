@@ -27,25 +27,12 @@ fn ofFn(comptime func: anytype) void {
 fn paramsAsTuple(comptime func: anytype) type {
     const fn_info = @typeInfo(@TypeOf(func)).@"fn";
 
-    comptime var fields: [fn_info.params.len]std.builtin.Type.StructField = undefined;
+    comptime var fields: [fn_info.params.len]type = undefined;
     inline for (fn_info.params, 0..)|param, i| {
-        fields[i] = .{
-            .name = std.fmt.comptimePrint("{d}", .{i}),
-            .type = param.type orelse null,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = 0,
-        };
+        fields[i] = param.type orelse null;
     }
 
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = fields[0..],
-            .decls = &.{},
-            .is_tuple = true,
-        },
-    });
+    return @Tuple(fields[0..]);
 }
 
 fn makeTuple(comptime tuple_type: type) tuple_type {

@@ -24,24 +24,24 @@ const Logger = zigjr.Logger;
 ///     hello: replies "Hello World!" when called.
 ///     hello-name: replies "Hello 'NAME'!" when called with a name.
 ///     hello-xtimes: replies "Hello 'NAME'" X times when called with a name and a number.
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
     // Getting the stdin and stdout boilerplate.
     var stdin_buffer: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(init.io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     // Use a file-based logger since the executable is run in a MCP host
     // as a sub-process and cannot log to the host's stdout.
-    var f_logger = try zigjr.FileLogger.init(alloc, "log.txt");
-    defer f_logger.deinit();
+    var f_logger = try zigjr.FileLogger.init(alloc, init.io, "log.txt");
+    defer f_logger.deinit(init.io);
 
     var rpc_dispatcher = try zigjr.RpcDispatcher.init(alloc);
     defer rpc_dispatcher.deinit();
@@ -256,7 +256,7 @@ const InputSchema = struct {
     pub fn init(alloc: Allocator) @This() {
         return .{
             .alloc = alloc,
-            .properties = jsonObject(alloc),
+            .properties = jsonObject(),
             .required = .empty,
         };
     }
@@ -284,7 +284,7 @@ const InputSchema = struct {
 
     pub fn addProperty(self: *@This(), prop_name: []const u8, type_name: []const u8, type_desc: []const u8) !void {
         const typeInfo = try typeObject(self.alloc, type_name, type_desc);
-        try self.properties.object.put(prop_name, typeInfo);
+        try self.properties.object.put(self.alloc, prop_name, typeInfo);
     }
 
     pub fn addRequired(self: *@This(), field_name: []const u8) !void {
@@ -449,14 +449,14 @@ const BlobResourceContents = struct {
 };
 
 
-fn jsonObject(alloc: Allocator) Value {
-    return Value { .object = std.json.ObjectMap.init(alloc) };
+fn jsonObject() Value {
+    return Value { .object = .empty };
 }
 
 fn typeObject(alloc: Allocator, type_name: []const u8, type_desc: []const u8) !Value {
-    var value = jsonObject(alloc);
-    try value.object.put("type", Value { .string = type_name });
-    try value.object.put("description", Value { .string = type_desc });
+    var value = jsonObject();
+    try value.object.put(alloc, "type", Value { .string = type_name });
+    try value.object.put(alloc, "description", Value { .string = type_desc });
     return value;
 }
 

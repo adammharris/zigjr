@@ -15,17 +15,17 @@ const DispatchResult = zigjr.DispatchResult;
 const ErrorCode = zigjr.ErrorCode;
 
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
     var stdin_buffer: [1024]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(init.io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     // RequestDispatcher interface implemented by the custom dispatcher HelloDispatcher.

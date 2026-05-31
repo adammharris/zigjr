@@ -61,7 +61,7 @@ fn drainDup(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io
 }
 
 
-fn sendFileDup(io_w: *std.Io.Writer, file_reader: *std.fs.File.Reader, limit: std.Io.Limit) std.Io.Writer.FileError!usize {
+fn sendFileDup(io_w: *std.Io.Writer, file_reader: *std.Io.File.Reader, limit: std.Io.Limit) std.Io.Writer.FileError!usize {
     const dw: *DupWriter = @alignCast(@fieldParentPtr("writer_interface", io_w));
     const len = try dw.writer1.sendFile(file_reader, limit);
     if (dw.writer2_enabled) {
@@ -92,7 +92,7 @@ test "Write dup with .write()" {
         try std.testing.expect(writer2.written().len == 3);
         try std.testing.expectEqualSlices(u8, writer1.written(), writer2.written());
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 
 test "Write dup with streaming" {
@@ -116,7 +116,7 @@ test "Write dup with streaming" {
         try std.testing.expect(writer2.written().len == 3);
         try std.testing.expectEqualSlices(u8, writer1.written(), writer2.written());
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 
 test "Write dup with streaming, small buffer" {
@@ -140,7 +140,7 @@ test "Write dup with streaming, small buffer" {
         try std.testing.expect(writer2.written().len == 40);
         try std.testing.expectEqualSlices(u8, writer1.written(), writer2.written());
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 
 test "Write dup with .write() and enableWriter2" {
@@ -170,6 +170,6 @@ test "Write dup with .write() and enableWriter2" {
         try std.testing.expectEqualSlices(u8, writer1.written(), "abc");
         try std.testing.expectEqualSlices(u8, writer2.written(), "ac");
     }
-    if (gpa.detectLeaks()) std.debug.print("Memory leak detected!\n", .{});
+    if (gpa.detectLeaks() != 0) std.debug.print("{} bytes leaked!\n", .{ gpa.detectLeaks() });
 }
 

@@ -74,7 +74,7 @@ pub fn requestsByDelimiter(alloc: Allocator, reader: *std.Io.Reader, writer: *st
 
 /// Runs a loop to read a stream of JSON response messages (frames) from the reader,
 /// and handle each one with the dispatcher.
-pub fn responsesByDelimiter(alloc: Allocator, reader: *std.Io.Reader,
+pub fn responsesByDelimiter(alloc: Allocator, io: std.Io, reader: *std.Io.Reader,
                             dispatcher: ResponseDispatcher, options: DelimiterOptions) !void {
     var frame_buf = std.Io.Writer.Allocating.init(alloc);
     defer frame_buf.deinit();
@@ -100,7 +100,7 @@ pub fn responsesByDelimiter(alloc: Allocator, reader: *std.Io.Reader,
 
         options.logger.log("stream.responsesByDelimiter", "receive response", response_json);
         const run_status = pipeline.runResponse(response_json, null) catch |err| {
-            var stderr_writer = std.fs.File.stderr().writer(&.{});
+            var stderr_writer = std.Io.File.stderr().writer(io, &.{});
             const stderr = &stderr_writer.interface;
             stderr.print("Error in runResponse(). {any}", .{err}) catch {};
             continue;
@@ -198,7 +198,7 @@ pub fn responsesByContentLength(alloc: Allocator, reader: anytype,
 
         options.logger.log("stream.responsesByContentLength", "receive response", response_json);
         pipeline.runResponse(response_json, null) catch |err| {
-            var stderr_writer = std.fs.File.stderr().writer(&.{});
+            var stderr_writer = std.Io.File.stderr().writer(&.{});
             const stderr = &stderr_writer.interface;
             stderr.print("Error in runResponse(). {any}", .{err}) catch {};
         };

@@ -35,30 +35,31 @@ const MyErrors = error{ MissingCfg, MissingCmd, MissingSourceFile };
 
 /// A LSP client example that spawns a LSP server as a sub-process and
 /// talks to it over the stdin/stdout transport.
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    var args = try CmdArgs.init(alloc);
+    var args = try CmdArgs.init(alloc, init.minimal.args);
     defer args.deinit();
     args.parse() catch { usage(); return; };
     std.debug.print("[lsp_client] LSP server cmd: {s}\n", .{ args.cmd_argv.items[0] });
 
-    var child = std.process.Child.init(args.cmd_argv.items, alloc);
-    child.stdin_behavior    = .Pipe;
-    child.stdout_behavior   = .Pipe;
-    child.stderr_behavior   = if (args.stderr) .Inherit else .Ignore;
-    try child.spawn();
+    var child = try std.process.spawn(init.io, .{
+        .argv = args.cmd_argv.items,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = if (args.stderr) .inherit else .ignore,
+    });
 
-    const request_thread    = try Thread.spawn(.{}, request_worker,  .{ child.stdin.? });
-    const response_thread   = try Thread.spawn(.{}, response_worker, .{ child.stdout.?, args });
+    const request_thread    = try Thread.spawn(.{}, request_worker,  .{ init.io, child.stdin.? });
+    const response_thread   = try Thread.spawn(.{}, response_worker, .{ init.io, child.stdout.?, args });
 
     request_thread.join();
     response_thread.join();
 
     child.stdin = null; // already closed by the request_worker; clear so it won't be closed again.
-    _ = try child.wait();
+    _ = try child.wait(init.io);
 }
 
 fn usage() void {
@@ -78,17 +79,17 @@ fn usage() void {
 // Poorman's quick and dirty command line argument parsing.
 const CmdArgs = struct {
     alloc:          Allocator,
-    arg_itr:        std.process.ArgIterator,
+    arg_itr:        std.process.Args.Iterator,
     cmd_argv:       ArrayList([]const u8),
     json:           bool = false,
     pp_json:        bool = false,
     dump:           bool = false,
     stderr:         bool = false,
 
-    fn init(alloc: Allocator) !@This() {
+    fn init(alloc: Allocator, args: std.process.Args) !@This() {
         return .{
             .alloc = alloc,
-            .arg_itr = try std.process.argsWithAllocator(alloc),
+            .arg_itr = try args.iterateAllocator(alloc),
             .cmd_argv = .empty,
         };
     }
@@ -116,17 +117,17 @@ const CmdArgs = struct {
 
 };
 
-fn request_worker(in_stdin: std.fs.File) !void {
+fn request_worker(io: std.Io, in_stdin: std.Io.File) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     const alloc = gpa.allocator();
     var writer_buf: [1024]u8 = undefined;
-    var in_fwriter = in_stdin.writer(&writer_buf);
+    var in_fwriter = in_stdin.writer(io, &writer_buf);
     const in_writer = &in_fwriter.interface;
     var id: i64 = 1;
 
     std.debug.print("\n[==== request_worker ====] starts\n", .{});
 
-    std.Thread.sleep(1_000_000_000);  // Wait a bit to let the LSP server to come up.
+    try io.sleep(.fromSeconds(1), .awake);  // Wait a bit to let the LSP server to come up.
     std.debug.print("\n[==== request_worker ====] Send 'initialize' message. id: {}\n", .{id});
     const initializeParams = InitializeParams {
         .rootUri = "file:///tmp",
@@ -135,12 +136,12 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "initialize", initializeParams, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'initialized' notification. id: none\n", .{});
     try writeContentLengthRequest(alloc, in_writer, "initialized", InitializedParams{}, RpcId.ofNone());
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'textDocument/didOpen' notification. id: none\n", .{});
     const didOpenTextDocumentParams = DidOpenTextDocumentParams {
         .textDocument = TextDocumentItem {
@@ -160,7 +161,7 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "textDocument/didOpen", didOpenTextDocumentParams, RpcId.ofNone());
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'textDocument/definition' message. id: {}\n", .{id});
     const definitionParams = DefinitionParams {
         .textDocument = .{ .uri = "file:///tmp/foo.zig" },
@@ -169,7 +170,7 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "textDocument/definition", definitionParams, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'textDocument/hover' message. id: {}\n", .{id});
     const hoverParams = HoverParams {
         .textDocument = .{ .uri = "file:///tmp/foo.zig" },
@@ -178,7 +179,7 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "textDocument/hover", hoverParams, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
 
     std.debug.print("\n[==== request_worker ====] Send 'textDocument/signatureHelp' message. id: {}\n", .{id});
     const signatureHelpParams = SignatureHelpParams {
@@ -188,7 +189,7 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "textDocument/signatureHelp", signatureHelpParams, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'textDocument/completion' message. id: {}\n", .{id});
     const completionParams = CompletionParams {
         .textDocument = .{ .uri = "file:///tmp/foo.zig" },
@@ -197,27 +198,27 @@ fn request_worker(in_stdin: std.fs.File) !void {
     try writeContentLengthRequest(alloc, in_writer, "textDocument/completion", completionParams, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'shutdown' request. id: {}\n", .{id});
     try writeContentLengthRequest(alloc, in_writer, "shutdown", null, RpcId.of(id));
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
+    try io.sleep(.fromSeconds(1), .awake);
     std.debug.print("\n[==== request_worker ====] Send 'exit' notification\n", .{});
     try writeContentLengthRequest(alloc, in_writer, "exit", null, RpcId.ofNone());
     id += 1;
 
-    std.Thread.sleep(1_000_000_000);
-    in_stdin.close();   // send an EOF signal to subprocess in case shutdown/exit didn't work.
+    try io.sleep(.fromSeconds(1), .awake);
+    in_stdin.close(io);   // send an EOF signal to subprocess in case shutdown/exit didn't work.
     std.debug.print("\n[==== request_worker ====] exits\n", .{});
 }
 
-fn response_worker(child_stdout: std.fs.File, args: CmdArgs) !void {
+fn response_worker(io: std.Io, child_stdout: std.Io.File, args: CmdArgs) !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     const alloc = gpa.allocator();
 
     var reader_buf: [1024]u8 = undefined;
-    var out_freader = child_stdout.readerStreaming(&reader_buf);
+    var out_freader = child_stdout.readerStreaming(io, &reader_buf);
     var out_reader = &out_freader.interface;
     std.debug.print("[---- response_worker ---] starts\n", .{});
 
@@ -258,7 +259,7 @@ fn response_worker(child_stdout: std.fs.File, args: CmdArgs) !void {
         };
 
         var stderr_buffer: [1024]u8 = undefined;
-        var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+        var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buffer);
         const stderr = &stderr_writer.interface;
 
         // Use the generic 'messagesByContentLength' to handle both requests and responses.

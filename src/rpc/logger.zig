@@ -104,30 +104,33 @@ pub const DbgLogger = struct {
 pub const FileLogger = struct {
     alloc: Allocator,
     count: usize = 0,
-    file: std.fs.File,
-    fwriter: std.fs.File.Writer,
+    file: std.Io.File,
+    fwriter: std.Io.File.Writer,
     write_buf: []const u8,
+    io: std.Io,
 
     /// Create a FileLogger to log to the file at 'file_path',
-    pub fn init(alloc: Allocator, file_path: []const u8) !FileLogger {
-        const file = try fileOpenIf(file_path);
-        try file.seekFromEnd(0);                        // seek to end for appending to file.
+    pub fn init(alloc: Allocator, io: std.Io, file_path: []const u8) !FileLogger {
+        const file = try fileOpenIf(io, file_path);
         const write_buf = try alloc.alloc(u8, 4096);    // buffer with the usual disk page size.
+        var fwriter = file.writer(io, write_buf);
+        try fwriter.seekTo(try file.length(io));        // seek to end for appending to file.
         return .{
             .alloc = alloc,
             .file = file,
-            .fwriter = file.writer(write_buf),
+            .fwriter = fwriter,
             .write_buf = write_buf,
+            .io = io,
         };
     }
 
-    pub fn deinit(self: *FileLogger) void {
-        self.file.close();
+    pub fn deinit(self: *FileLogger, io: std.Io) void {
+        self.file.close(io);
         self.alloc.free(self.write_buf);
     }
 
     pub fn start(self: *FileLogger, message: []const u8) void {
-        const ts_sec = std.time.timestamp();
+        const ts_sec = std.Io.Timestamp.now(self.io, .real).toSeconds();
         self.fwriter.interface.print("Timestamp {d} - {s}\n", .{ts_sec, message})
             catch |err| std.debug.print("Error while printing in start(). {any}\n", .{err});
         self.fwriter.interface.flush() 
@@ -143,17 +146,17 @@ pub const FileLogger = struct {
     }
     
     pub fn stop(self: *FileLogger, message: []const u8) void {
-        const ts_sec = std.time.timestamp();
+        const ts_sec = std.Io.Timestamp.now(self.io, .real).toSeconds();
         self.fwriter.interface.print("Timestamp {d} - {s}\n\n", .{ts_sec, message})
             catch |err| std.debug.print("Error while printing in stop(). {any}\n", .{err});
         self.fwriter.interface.flush()
             catch |err| std.debug.print("Error while flushing in stop(). {any}\n", .{err});
     }
 
-    fn fileOpenIf(file_path: []const u8) !std.fs.File {
-        return std.fs.cwd().openFile(file_path, .{ .mode = .write_only }) catch |err| {
+    fn fileOpenIf(io: std.Io, file_path: []const u8) !std.Io.File {
+        return std.Io.Dir.cwd().openFile(io, file_path, .{ .mode = .write_only }) catch |err| {
             if (err == error.FileNotFound) {
-                return try std.fs.cwd().createFile(file_path, .{ .read = false });
+                return try std.Io.Dir.cwd().createFile(io, file_path, .{ .read = false });
             } else {
                 return err;
             }
