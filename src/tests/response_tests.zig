@@ -95,11 +95,13 @@ const FloatCalcDispatcher = struct {
         const a = switch (params.items[0]) {
             .float   => |f| f,
             .integer => |n| @as(f64, @floatFromInt(n)),
+            .number_string => |t| std.fmt.parseFloat(f64, t) catch return .{ .err = .{ .code = ErrorCode.InvalidParams } },
             else => return .{ .err = .{ .code = ErrorCode.InvalidParams } }
         };
         const b = switch (params.items[1]) {
             .float   => |f| f,
             .integer => |n| @as(f64, @floatFromInt(n)),
+            .number_string => |t| std.fmt.parseFloat(f64, t) catch return .{ .err = .{ .code = ErrorCode.InvalidParams } },
             else => return .{ .err = .{ .code = ErrorCode.InvalidParams } }
         };
 
@@ -463,7 +465,7 @@ test "Response to a request of float divide" {
         defer parsed_res.deinit();
         const res = try parsed_res.response();
 
-        try testing.expectEqual(res.result.float, 10.0/3.0);
+        try testing.expectEqual(try resultFloat(res), 10.0/3.0);
         try testing.expect(res.resultEql(10.0/3.0));
         try testing.expect(res.id.eql(1));
     }
@@ -895,3 +897,14 @@ test "Dispatch batch responses on batch JSON requests with the CounterDispatcher
 
 
 
+
+/// A float result, which a response read without the float parser carries
+/// as its text.
+fn resultFloat(res: anytype) !f64 {
+    return switch (res.result) {
+        .float => |f| f,
+        .integer => |i| @floatFromInt(i),
+        .number_string => |t| try std.fmt.parseFloat(f64, t),
+        else => error.NotAFloat,
+    };
+}

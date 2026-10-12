@@ -21,6 +21,7 @@ const errors = @import("errors.zig");
 const ErrorCode = errors.ErrorCode;
 const JrErrors = errors.JrErrors;
 const Owned = @import("../rpc/deiniter.zig").Owned;
+const wire = @import("wire_value.zig");
 
 
 /// Parse response_json into a RpcResponseResult.
@@ -126,6 +127,29 @@ pub const RpcResponse = struct {
     result:     Value = .{ .null = {} },    // default for optional field.
     @"error":   RpcResponseError = .{},     // parse error and validation error.
 
+    /// Read field by field, every value through `wire_value`, so reading a
+    /// response links no float parser.
+    pub fn jsonParse(alloc: Allocator, source: anytype, options: ParseOptions) !Self {
+        try wire.beginObject(source);
+        var self = Self{};
+        while (try wire.nextKey(alloc, source, options)) |key| {
+            if (std.mem.eql(u8, key, "jsonrpc")) {
+                const v = try wire.string(alloc, source, options);
+                if (v.len != 3) return error.LengthMismatch;
+                self.jsonrpc = v[0..3].*;
+            } else if (std.mem.eql(u8, key, "id")) {
+                self.id = try RpcId.jsonParse(alloc, source, options);
+            } else if (std.mem.eql(u8, key, "result")) {
+                self.result = try wire.parseValue(alloc, source, options);
+            } else if (std.mem.eql(u8, key, "error")) {
+                self.@"error" = try RpcResponseError.jsonParse(alloc, source, options);
+            } else {
+                try wire.unknownField(source, options);
+            }
+        }
+        return self;
+    }
+
     fn ofParseErr(parse_err: ParseError(Scanner)) Self {
         var empty_res = RpcResponse{};
         empty_res.@"error" = RpcResponseError.fromParseError(parse_err);
@@ -162,6 +186,23 @@ pub const RpcResponseError = struct {
     code:       i32 = 0,
     message:    []const u8 = "",
     data:       ?Value = null,
+
+    pub fn jsonParse(alloc: Allocator, source: anytype, options: ParseOptions) !Self {
+        try wire.beginObject(source);
+        var self = Self{};
+        while (try wire.nextKey(alloc, source, options)) |key| {
+            if (std.mem.eql(u8, key, "code")) {
+                self.code = try wire.integer(i32, alloc, source, options);
+            } else if (std.mem.eql(u8, key, "message")) {
+                self.message = try wire.string(alloc, source, options);
+            } else if (std.mem.eql(u8, key, "data")) {
+                self.data = try wire.parseValue(alloc, source, options);
+            } else {
+                try wire.unknownField(source, options);
+            }
+        }
+        return self;
+    }
 
     fn fromParseError(parse_err: ParseError(Scanner)) Self {
         return switch (parse_err) {
@@ -221,6 +262,8 @@ pub fn jsonValueEql(json_value: Value, value: anytype) bool {
             switch (json_value) {
                 .integer    => return @as(f64, @floatFromInt(json_value.integer)) == value,
                 .float      => return json_value.float == value,
+                // A fraction is read as its text (wire_value.zig).
+                .number_string => |t| return (std.fmt.parseFloat(f64, t) catch return false) == value,
                 else        => return false,
             }
         },

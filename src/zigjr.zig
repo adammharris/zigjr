@@ -76,6 +76,7 @@ test {
     _ = @import("tests/misc_tests.zig");
     _ = @import("streaming/BufReader.zig");
     _ = @import("streaming/DupWriter.zig");
+    _ = @import("jsonrpc/wire_value.zig");
 }
 
 

@@ -152,7 +152,7 @@ pub fn makeRpcHandler(context: anytype, comptime F: anytype) RpcHandler {
                 .array  => {
                     return callOnArray(F, hinfo, ctx, dc, params_value.array);
                 },
-                .bool, .integer, .float, .string => {
+                .bool, .integer, .float, .number_string, .string => {
                     // JSON-RPC spec doesn't support primitive JSON types for the "params" property.
                     // Add them here for completeness.
                     return callOnPrimitive(F, hinfo, ctx, dc, params_value);
@@ -642,7 +642,9 @@ fn valueAs(comptime ParamType: type) type {
                 .float => switch (json_value) {
                     .float      => |x| return x,
                     .integer    => |x| return @as(f64, @floatFromInt(x)),
-                    .string     => |x| return try std.fmt.parseFloat(f64, x),
+                    // A message is read without the float parser
+                    // (jsonrpc/wire_value.zig): a fraction arrives as text.
+                    .string, .number_string => |x| return try std.fmt.parseFloat(f64, x),
                     else        => return JrErrors.InvalidJsonValueType,
                 },
                 .pointer => {
@@ -651,7 +653,7 @@ fn valueAs(comptime ParamType: type) type {
                             .bool       => |x| return try allocPrint(alloc, "{}", .{x}),
                             .integer    => |x| return try allocPrint(alloc, "{}", .{x}),
                             .float      => |x| return try allocPrint(alloc, "{}", .{x}),
-                            .string     => |x| return try allocPrint(alloc, "{s}", .{x}),
+                            .string, .number_string => |x| return try allocPrint(alloc, "{s}", .{x}),
                             else        => return JrErrors.InvalidJsonValueType,
                         }
                     } else {

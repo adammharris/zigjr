@@ -22,6 +22,7 @@ const errors = @import("errors.zig");
 const ErrorCode = errors.ErrorCode;
 const JrErrors = errors.JrErrors;
 const Owned = @import("../rpc/deiniter.zig").Owned;
+const wire = @import("wire_value.zig");
 
 
 /// Parse request_json into a RpcRequestResult.
@@ -131,6 +132,32 @@ pub const RpcRequest = struct {
     _err:       RpcRequestError = .{},      // attach parsing error and validation error here.
     _no_method: bool = false,               // treat MissingField error as no method.
 
+    /// Read field by field, every value through `wire_value`, so reading a
+    /// request links no float parser.
+    pub fn jsonParse(alloc: Allocator, source: anytype, options: ParseOptions) !Self {
+        try wire.beginObject(source);
+        var self = Self{};
+        var has_method = false;
+        while (try wire.nextKey(alloc, source, options)) |key| {
+            if (std.mem.eql(u8, key, "jsonrpc")) {
+                const v = try wire.string(alloc, source, options);
+                if (v.len != 3) return error.LengthMismatch;
+                self.jsonrpc = v[0..3].*;
+            } else if (std.mem.eql(u8, key, "method")) {
+                self.method = try alloc.dupe(u8, try wire.string(alloc, source, options));
+                has_method = true;
+            } else if (std.mem.eql(u8, key, "params")) {
+                self.params = try wire.parseValue(alloc, source, options);
+            } else if (std.mem.eql(u8, key, "id")) {
+                self.id = try RpcId.jsonParse(alloc, source, options);
+            } else {
+                try wire.unknownField(source, options);
+            }
+        }
+        self._no_method = !has_method;
+        return self;
+    }
+
     fn ofParseErr(parse_err: ParseError(Scanner)) Self {
         var empty_req = Self{};
         empty_req._err = RpcRequestError.fromParseError(parse_err);
@@ -189,7 +216,7 @@ pub const RpcId = union(enum) {
     pub fn ofStr(id: []const u8) RpcId { return .{ .str = id }; }
 
     pub fn jsonParse(alloc: Allocator, source: anytype, options: ParseOptions) !RpcId {
-        const value = try innerParse(Value, alloc, source, options);
+        const value = try wire.parseValue(alloc, source, options);
         return switch (value) {
             .null       => .{ .null = value.null    },
             .integer    => .{ .num = value.integer  },
