@@ -6,11 +6,11 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const strip_debug_symbols = b.option(bool, "strip", "strip debugging symbols") orelse false;
 
+    // The library module leaves target, optimize and strip unset, so it
+    // takes them from whatever imports it: a wasm build that strips gets no
+    // debug sections from this module. The tests and examples set them.
     const zigjr_mod = b.addModule("zigjr", .{
         .root_source_file = b.path("src/zigjr.zig"),
-        .target = target,
-        .optimize = optimize,
-        .strip = strip_debug_symbols,
     });
 
     // Building examples
@@ -77,7 +77,12 @@ pub fn build(b: *std.Build) void {
 
     // End of building examples
 
-    const lib_unit_tests = b.addTest(.{ .root_module = zigjr_mod });
+    const lib_unit_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/zigjr.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip_debug_symbols,
+    }) });
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
