@@ -1,6 +1,16 @@
 # ZigJR - JSON-RPC 2.0 Library for Zig
 
-<strong>(Note: ZigJR 2.0 is under development. It will introduce some breaking changes. 
+> **This is a hard fork, maintained for [fig](https://github.com/diaryx-org/fig)
+> and [twig](https://github.com/diaryx-org/twig).** It follows the Zig
+> release those two build with (0.17.0 now), and changes what they need
+> changed; it does not track upstream, and is not a drop-in replacement for
+> it. For general use, prefer
+> [williamw520/zigjr](https://github.com/williamw520/zigjr). Bugs in code
+> both share are worth reporting upstream too.
+>
+> The rest of this README is upstream's, and describes upstream's API.
+
+<strong>(Note, from upstream: ZigJR 2.0 is under development. It will introduce some breaking changes. 
 The main changes are for adding session based handling support and multi-thread support.)</strong>
 
 ZigJR is a lightweight Zig library providing a full implementation of the JSON-RPC 2.0 protocol,
