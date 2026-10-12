@@ -18,7 +18,7 @@ fn bar(a: f64) void { std.debug.print("bar: a={}\n", .{a}); }
 fn ofFn(comptime func: anytype) void {
     const fn_info = @typeInfo(@TypeOf(func)).@"fn";
     //std.debug.print("fn_info={any}\n", .{fn_info.params});
-    inline for (fn_info.params, 0..)|param, i| {
+    inline for (fn_info.param_types, 0..)|param, i| {
         std.debug.print("arg_{d}: param={any}\n", .{i, param});
         // std.fmt.comptimePrint("arg_{d}: type={any}", .{i, param.type});
     }
@@ -27,9 +27,9 @@ fn ofFn(comptime func: anytype) void {
 fn paramsAsTuple(comptime func: anytype) type {
     const fn_info = @typeInfo(@TypeOf(func)).@"fn";
 
-    comptime var fields: [fn_info.params.len]type = undefined;
-    inline for (fn_info.params, 0..)|param, i| {
-        fields[i] = param.type orelse null;
+    comptime var fields: [fn_info.param_types.len]type = undefined;
+    inline for (fn_info.param_types, 0..)|param, i| {
+        fields[i] = param orelse null;
     }
 
     return @Tuple(fields[0..]);
@@ -38,7 +38,8 @@ fn paramsAsTuple(comptime func: anytype) type {
 fn makeTuple(comptime tuple_type: type) tuple_type {
     const tt_info = @typeInfo(tuple_type).@"struct";
     var tuple: tuple_type = undefined;
-    inline for (tt_info.fields, 0..)|field, i| {
+    inline for (tt_info.field_names, tt_info.field_types, 0..)|name, ftype, i| {
+        const field = .{ .name = name, .type = ftype };
         std.debug.print("@\"{d}\": {any}\n", .{i, field});
         @field(tuple, field.name) = 42;
     }
@@ -48,7 +49,8 @@ fn makeTuple(comptime tuple_type: type) tuple_type {
 fn jsonToTuple(comptime tuple_type: type, args: Array) tuple_type {
     const tt_info = @typeInfo(tuple_type).@"struct";
     var tuple: tuple_type = undefined;
-    inline for (tt_info.fields, 0..)|field, i| {
+    inline for (tt_info.field_names, tt_info.field_types, 0..)|name, ftype, i| {
+        const field = .{ .name = name, .type = ftype };
         const arg = args.items[i];
         std.debug.print("@\"{d}\"| field: {any} | arg: {any}\n", .{i, field, arg});
         @field(tuple, field.name) = 42;

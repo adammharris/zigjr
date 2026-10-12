@@ -181,7 +181,7 @@ pub const JsonStr = struct {
 const HandlerInfo = struct {
     CTX:            type,                   // The type of the context object (the self pointer type).
     fn_info:        Type.Fn,                // Info on the handler function.
-    params:         []const Type.Fn.Param,  // The parameter array of the handler function.
+    params:         []const ?type,  // The parameter array of the handler function.
     tuple_type:     type,                   // The type of parameter tuple for calling the handler function.
     ctx_idx:        ?usize,
     dc_idx:         ?usize,
@@ -206,17 +206,17 @@ const HandlerInfo = struct {
 
 inline fn getHandlerInfo(context: anytype, comptime handler_fn: anytype) HandlerInfo {
     const fn_info       = getFnInfo(handler_fn);
-    const params        = fn_info.params;
+    const params        = fn_info.param_types;
     const CTX           = @TypeOf(context);
     const ctx_idx       = getCtxParamIdx(params, CTX);
     const dc_idx        = getDispatchCtxParamIdx(params);
     const alloc_idx     = getAllocatorParamIdx(params);
     const user_idx      = findUserIdx(ctx_idx, dc_idx, alloc_idx);
-    const is_value1     = params.len == user_idx + 1 and isValue(params[user_idx].type);
-    const is_struct     = params.len == user_idx + 1 and isStruct(params[user_idx].type);
-    const is_optional1  = params.len == user_idx + 1 and isOptional(params[user_idx].type);
+    const is_value1     = params.len == user_idx + 1 and isValue(params[user_idx]);
+    const is_struct     = params.len == user_idx + 1 and isStruct(params[user_idx]);
+    const is_optional1  = params.len == user_idx + 1 and isOptional(params[user_idx]);
     const is_obj1       = is_struct and !is_value1;
-    const obj1_type     = if (is_obj1) params[user_idx].type.? else void;
+    const obj1_type     = if (is_obj1) params[user_idx].? else void;
 
     return .{
         .CTX            = CTX,
@@ -243,10 +243,15 @@ inline fn getHandlerInfo(context: anytype, comptime handler_fn: anytype) Handler
 
 /// Make a tuple type from the parameters of a function.
 /// Each parameter becomes a field of the tuple.
-inline fn ArgsTupleType(comptime params: []const Type.Fn.Param) type {
+/// A tuple's field by index, as the name and type the pre-0.17 `fields` held.
+inline fn fieldAt(comptime info: Type.Struct, comptime i: usize) struct { name: [:0]const u8, type: type } {
+    return .{ .name = info.field_names[i], .type = info.field_types[i] };
+}
+
+inline fn ArgsTupleType(comptime params: []const ?type) type {
     comptime var fields: [params.len]type = undefined;
     inline for (params, 0..)|param, i| {
-        fields[i] = param.type orelse null;
+        fields[i] = param orelse null;
     }
 
     return @Tuple(fields[0..]);
@@ -260,7 +265,7 @@ inline fn getFnInfo(comptime handler_fn: anytype) Type.Fn {
     };
 }
 
-inline fn getCtxParamIdx(comptime params: []const Type.Fn.Param, CTX: type) ?usize {
+inline fn getCtxParamIdx(comptime params: []const ?type, CTX: type) ?usize {
     const c_info = @typeInfo(CTX);
     if (c_info != .pointer) {
         @compileError("The 'context' for the handler should have a pointer type, *" ++ @typeName(CTX));
@@ -269,8 +274,8 @@ inline fn getCtxParamIdx(comptime params: []const Type.Fn.Param, CTX: type) ?usi
     const C = c_info.pointer.child;         // base type of CTX.
     const C_Name = @typeName(C);
     inline for (params, 0..) |p, idx| {
-        if (!hasType(p.type, C)) continue;
-        const p_info = @typeInfo(p.type.?);
+        if (!hasType(p, C)) continue;
+        const p_info = @typeInfo(p.?);
         if (p_info == .pointer) return idx;
         comptime var buf: [256]u8 = undefined;
         @compileError(try bufPrint(&buf, "Context parameter {} for the handler should be *{s}, not {s}.", .{idx, C_Name, C_Name}));
@@ -278,12 +283,12 @@ inline fn getCtxParamIdx(comptime params: []const Type.Fn.Param, CTX: type) ?usi
     return null;
 }
 
-inline fn getDispatchCtxParamIdx(comptime params: []const Type.Fn.Param) ?usize {
+inline fn getDispatchCtxParamIdx(comptime params: []const ?type) ?usize {
     inline for (params, 0..) |p, idx| {
-        if (!hasType(p.type, DispatchCtx)) continue;
-        const p_info = @typeInfo(p.type.?);
+        if (!hasType(p, DispatchCtx)) continue;
+        const p_info = @typeInfo(p.?);
         if (p_info == .pointer) {
-            if (p_info.pointer.is_const) {
+            if (p_info.pointer.attrs.@"const") {
                 comptime var buf: [256]u8 = undefined;
                 @compileError(try bufPrint(&buf, "Parameter {} for the handler should be *DispatchCtx, not *const DispatchCtx.", .{idx}));
             }
@@ -295,10 +300,10 @@ inline fn getDispatchCtxParamIdx(comptime params: []const Type.Fn.Param) ?usize 
     return null;
 }
 
-inline fn getAllocatorParamIdx(comptime params: []const Type.Fn.Param) ?usize {
+inline fn getAllocatorParamIdx(comptime params: []const ?type) ?usize {
     inline for (params, 0..) |p, idx| {
-        if (!hasType(p.type, std.mem.Allocator)) continue;
-        const p_info = @typeInfo(p.type.?);
+        if (!hasType(p, std.mem.Allocator)) continue;
+        const p_info = @typeInfo(p.?);
         if (p_info == .pointer) {
             comptime var buf: [256]u8 = undefined;
             @compileError(try bufPrint(&buf, "Parameter {} of the handler should be Allocator, not *Allocator.", .{idx}));
@@ -319,10 +324,10 @@ inline fn findUserIdx(ctx_idx: ?usize, dc_idx: ?usize, alc_idx: ?usize) usize {
     return user_idx;
 }
 
-inline fn getParamType(comptime params: []const Type.Fn.Param, idx: ?usize) ?type {
+inline fn getParamType(comptime params: []const ?type, idx: ?usize) ?type {
     if (idx) |i| {
         if (i < params.len) {
-            return params[i].type;
+            return params[i];
         }
     }
     return null;
@@ -552,7 +557,7 @@ fn jsonValueToTuple(comptime hinfo: HandlerInfo, ctx: ?*anyopaque, dc: *Dispatch
                     value: Value) hinfo.tuple_type {
     var tuple: hinfo.tuple_type = initArgsTuple(hinfo, ctx, dc);
     const tt_info = @typeInfo(hinfo.tuple_type).@"struct";
-    const t_field = tt_info.fields[hinfo.user_idx];
+    const t_field = fieldAt(tt_info, hinfo.user_idx);
     @field(tuple, t_field.name) = value;        // Value for the single argument.
     return tuple;
 }
@@ -561,7 +566,7 @@ fn primitiveToTuple(comptime hinfo: HandlerInfo, ctx: ?*anyopaque, dc: *Dispatch
                     primitive_value: Value) !hinfo.tuple_type {
     var tuple: hinfo.tuple_type = initArgsTuple(hinfo, ctx, dc);
     const tt_info = @typeInfo(hinfo.tuple_type).@"struct";
-    const t_field = tt_info.fields[hinfo.user_idx];
+    const t_field = fieldAt(tt_info, hinfo.user_idx);
     const value = try valueAs(t_field.type).from(primitive_value);
     @field(tuple, t_field.name) = value;
     return tuple;
@@ -573,8 +578,8 @@ fn arrayToTuple(comptime hinfo: HandlerInfo, ctx: ?*anyopaque, dc: *DispatchCtx,
     const tt_info = @typeInfo(hinfo.tuple_type).@"struct";
     const start_idx = hinfo.user_idx;
     // Fill in the rest of the user specific parameters.
-    inline for (start_idx.. tt_info.fields.len) |i| {
-        const t_field = tt_info.fields[i];
+    inline for (start_idx.. tt_info.field_names.len) |i| {
+        const t_field = fieldAt(tt_info, i);
         const j_value = values.items[i - start_idx];
         if (isValue(t_field.type)) {
             @field(tuple, t_field.name) = j_value;
@@ -597,7 +602,7 @@ fn objectToTuple(comptime hinfo: HandlerInfo, ctx: ?*anyopaque, dc: *DispatchCtx
                  object: hinfo.obj1_type) hinfo.tuple_type {
     var tuple: hinfo.tuple_type = initArgsTuple(hinfo, ctx, dc);
     const tt_info = @typeInfo(hinfo.tuple_type).@"struct";
-    const t_field = tt_info.fields[hinfo.user_idx];
+    const t_field = fieldAt(tt_info, hinfo.user_idx);
     @field(tuple, t_field.name) = object;
     return tuple;
 }
